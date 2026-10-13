@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 Persistent
+#Include settings.ahk
 CoordMode("Caret", "Screen")
 CoordMode("Mouse", "Screen")
 
@@ -11,49 +12,17 @@ languageBadge.MarginY := 8
 languageBadge.SetFont("s14 Bold", "Segoe UI")
 languageBadgeText := languageBadge.AddText("cFFFFFF Center w145 h30", "")
 
-; Direct keyboard-language shortcuts (no cycling):
-; Alt+Shift+A = Arabic (Arabic 101)
-; Alt+Shift+E = Latin letters via Turkish Q (no English layout installed)
-; Alt+Shift+T = Turkish Q
+InitSettings()
+; Language removal is no longer automatic: users may select any installed language.
 
-languageEnforcer := A_ScriptDir "\enforce-keyboard-languages.ps1"
-; Allow hotkeys to start immediately, even while Windows is still signing in.
-SetTimer(RepairLanguageProfiles, -10000)
-
-OnMessage(0x218, LanguagePowerEvent)
-SetTimer(CheckExtraLayouts, 60000)
 taskbarSearchBounds := []
 taskbarSearchPressed := false
 SetTimer(RefreshTaskbarSearchBounds, -12000)
 SetTimer(RefreshTaskbarSearchBounds, 30000)
 
-LanguagePowerEvent(wParam, *) {
-    if wParam = 7 || wParam = 18
-        SetTimer(RepairLanguageProfiles, -3000)
-}
-
-CheckExtraLayouts() {
-    count := DllCall("GetKeyboardLayoutList", "Int", 0, "Ptr", 0)
-    layouts := Buffer(count * A_PtrSize)
-    DllCall("GetKeyboardLayoutList", "Int", count, "Ptr", layouts)
-    Loop count {
-        lang := NumGet(layouts, (A_Index - 1) * A_PtrSize, "Ptr") & 0xFFFF
-        if lang = 0x0401 || (lang & 0x3FF) = 9 {
-            RepairLanguageProfiles()
-            return
-        }
-    }
-}
-
-RepairLanguageProfiles() {
-    global languageEnforcer
-    if FileExist(languageEnforcer)
-        RunWait("powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"" languageEnforcer "`"", , "Hide")
-}
-
 SwitchKeyboardLayout(layoutId) {
-    ; Select the existing language profile; never load Saudi Arabic (0401).
-    wanted := layoutId = "00000401" ? 0x2801 : 0x041F
+    ; Select an installed language profile by Windows locale name or LANGID.
+    wanted := LocaleId(layoutId)
     count := DllCall("GetKeyboardLayoutList", "Int", 0, "Ptr", 0)
     layouts := Buffer(count * A_PtrSize)
     DllCall("GetKeyboardLayoutList", "Int", count, "Ptr", layouts)
@@ -66,6 +35,7 @@ SwitchKeyboardLayout(layoutId) {
         }
     }
     if !hkl {
+        TrayTip("أضف اللغة من إعدادات لغة Windows أولاً: " layoutId, "اللغة غير مثبتة")
         return
     }
 
@@ -77,9 +47,6 @@ SwitchKeyboardLayout(layoutId) {
     }
 }
 
-!+a::SwitchKeyboardLayout("00000401")
-!+e::SwitchKeyboardLayout("0000041F")
-!+t::SwitchKeyboardLayout("0000041F")
 
 ; Capture the taskbar Search button before Windows replaces it with SearchHost.
 ~LButton::RecordMouseDownTarget()
@@ -456,7 +423,7 @@ IsSpecialWritingSurface(automation, x, y, window) {
 }
 
 ShowLanguageBadge(nearMouse := false, fixedX := "", fixedY := "") {
-    global languageBadge, languageBadgeText
+    global languageBadge, languageBadgeText, languageSettings
     DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
     activeWindow := WinExist("A")
     if !activeWindow
@@ -471,6 +438,12 @@ ShowLanguageBadge(nearMouse := false, fixedX := "", fixedY := "") {
     languageId := layout & 0xFFFF
     primaryLanguage := languageId & 0x3FF
     label := primaryLanguage = 1 ? "العربية  AR" : primaryLanguage = 31 ? "Türkçe  TR" : primaryLanguage = 9 ? "English  EN" : Format("LANG {:04X}", languageId)
+    for entry in languageSettings.Entries {
+        if LocaleId(entry.Tag) = languageId {
+            label := entry.Label
+            break
+        }
+    }
     languageBadgeText.Text := label
 
     MouseGetPos(&mouseX, &mouseY)
